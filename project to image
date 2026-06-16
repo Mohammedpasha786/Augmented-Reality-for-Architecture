@@ -1,0 +1,53 @@
+function projWalls = project_to_image(walls3D, R, t, cameraParams)
+% project_to_image  Project 3D wall quads into 2D image pixel coordinates
+%
+% INPUTS:
+%   walls3D      — struct array from build_3d_walls
+%   R            — 3×3 rotation  (world → camera)
+%   t            — 1×3 translation (metres)
+%   cameraParams — cameraParameters object
+%
+% OUTPUT:
+%   projWalls    — struct array, one per wall:
+%                    .pts2D   4×2  projected corner pixels
+%                    .depth   scalar mean depth (for painter's sort)
+%                    .visible logical (facing camera?)
+
+nW = length(walls3D);
+projWalls(nW) = struct('pts2D', [], 'depth', 0, 'visible', false);
+
+% Camera optical axis direction in world coords
+camOptAxis = R' * [0;0;1];
+
+for k = 1:nW
+    verts = walls3D(k).verts;  % 4×3
+
+    % Back-face culling: skip walls facing away
+    faceNorm = walls3D(k).normal(:);
+    camDir   = -camOptAxis;
+    if dot(faceNorm, camDir) < 0
+        projWalls(k).visible = false;
+        projWalls(k).pts2D   = zeros(4,2);
+        projWalls(k).depth   = Inf;
+        continue;
+    end
+
+    % Transform to camera coordinates
+    vCam = (R * verts' + t')';   % 4×3
+
+    % Check all vertices in front of camera
+    if any(vCam(:,3) <= 0)
+        projWalls(k).visible = false;
+        projWalls(k).pts2D   = zeros(4,2);
+        projWalls(k).depth   = Inf;
+        continue;
+    end
+
+    % Project via intrinsics
+    pts2D = worldToImage(cameraParams, R, t, verts);
+
+    projWalls(k).pts2D   = pts2D;
+    projWalls(k).depth   = mean(vCam(:,3));
+    projWalls(k).visible = true;
+end
+end
