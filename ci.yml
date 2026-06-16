@@ -1,0 +1,92 @@
+name: AR Architecture CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: MATLAB Lint (checkcode)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: R2024a
+          products: >
+            Computer_Vision_Toolbox
+            Image_Processing_Toolbox
+
+      - name: Run checkcode on all source files
+        uses: matlab-actions/run-command@v2
+        with:
+          command: |
+            srcFiles = dir(fullfile('src', '**', '*.m'));
+            hasIssues = false;
+            for k = 1:length(srcFiles)
+              fp = fullfile(srcFiles(k).folder, srcFiles(k).name);
+              msgs = checkcode(fp, '-id');
+              errs = msgs(strcmp({msgs.id}, 'NASGU') == 0);  % suppress unused-var noise
+              if ~isempty(errs)
+                fprintf('LINT: %s\n', fp);
+                for j = 1:length(errs)
+                  fprintf('  L%d [%s]: %s\n', errs(j).line, errs(j).id, errs(j).message);
+                end
+                hasIssues = true;
+              end
+            end
+            if hasIssues, error('Lint errors found.'); end
+            disp('Lint passed.');
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+        with:
+          release: R2024a
+          products: >
+            Computer_Vision_Toolbox
+            Image_Processing_Toolbox
+
+      - name: Run tests
+        uses: matlab-actions/run-tests@v2
+        with:
+          source-folder: src
+          test-results-junit: test-results/results.xml
+          code-coverage-cobertura: coverage/coverage.xml
+          select-by-folder: tests
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage/
+
+  validate-docs:
+    name: Validate Docs & Assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check required files
+        run: |
+          for f in README.md config.m main_video.m main_realtime.m requirements.txt LICENSE; do
+            [ -f "$f" ] && echo "OK: $f" || (echo "MISSING: $f" && exit 1)
+          done
+          [ -f "docs/project_description.docx" ] && echo "OK: docx" || echo "WARN: docx missing"
